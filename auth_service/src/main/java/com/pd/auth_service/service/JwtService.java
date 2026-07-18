@@ -1,5 +1,6 @@
 package com.pd.auth_service.service;
 
+import com.pd.auth_service.domain.entity.AuthUser;
 import com.pd.auth_service.domain.entity.RefreshToken;
 import com.pd.auth_service.repository.RefreshTokenRepository;
 import io.jsonwebtoken.Claims;
@@ -25,19 +26,24 @@ public class JwtService {
     private String secret;
     private final RefreshTokenRepository refreshTokenRepository;
 
-    public String generateToken(String username){
+    public String generateToken(AuthUser user){
 
         return Jwts.builder()
-                .subject(username)
+                .subject(user.getUserId().toString())
+                .claim("username",user.getUsername())
+                .claim("role",user.getRole().name())
+                .claim("provider",user.getAuthProvider().name())
                 .issuedAt(new Date())
-                .expiration(
-                        new Date(System.currentTimeMillis()+1000*60*15)
-                )
+                .expiration(new Date(System.currentTimeMillis()+1000*60*15))
                 .signWith(Keys.hmacShaKeyFor(secret.getBytes()))
                 .compact();
     }
 
     public String extractUsername(String token){
+        return extractClaims(token).get("username",String.class);
+    }
+
+    public String extractUserId(String token){
         return extractClaims(token).getSubject();
     }
 

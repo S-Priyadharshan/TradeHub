@@ -9,6 +9,7 @@ import com.pd.auth_service.domain.enums.AuthProvider;
 import com.pd.auth_service.domain.enums.Role;
 import com.pd.auth_service.exception.AccountSuspendedException;
 import com.pd.auth_service.exception.InvalidTokenException;
+import com.pd.auth_service.exception.InvalidCredentialsException;
 import com.pd.auth_service.mapper.AuthMapper;
 import com.pd.auth_service.repository.AuthUserRepository;
 import com.pd.auth_service.repository.RefreshTokenRepository;
@@ -19,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -28,6 +30,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
+
 
 @Service
 @RequiredArgsConstructor
@@ -79,7 +82,7 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountSuspendedException("User account is suspended");
         }
 
-        String token = jwtService.generateToken(loginRequest.username());
+        String token = jwtService.generateToken(user);
         String refreshToken = jwtService.generateAndPersistRefreshToken(user.getUserId());
 
         return authMapper.toLoginResponse(token,900L,refreshToken);
@@ -109,7 +112,7 @@ public class AuthServiceImpl implements AuthService {
         storedToken.setRevoked(Boolean.TRUE);
         refreshTokenRepository.save(storedToken);
 
-        String newAccessToken = jwtService.generateToken(user.getUsername());
+        String newAccessToken = jwtService.generateToken(user);
         String newRefreshToken = jwtService.generateAndPersistRefreshToken(user.getUserId());
 
         return authMapper.toLoginResponse(newAccessToken,900L,newRefreshToken);
@@ -146,10 +149,33 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountSuspendedException("User account is suspended");
         }
 
-        String token = jwtService.generateToken(jwt.getClaimAsString("preferred_username"));
+        String token = jwtService.generateToken(user);
         String refreshToken = jwtService.generateAndPersistRefreshToken(user.getUserId());
 
         return authMapper.toLoginResponse(token,900L,refreshToken);
+    }
+
+    @Override
+    public void changePassword(ChangePasswordRequest request){
+        String username = SecurityContextHolder.getContext()
+                .getAuthentication()
+                .getName();
+
+        AuthUser user = authUserRepository.findByUsername(username)
+                .orElseThrow(()->new UsernameNotFoundException("User not found"));
+
+        if(AuthProvider.KEYCLOAK.equals(user.getAuthProvider())){
+            throw new UnsupportedOperationException("Password change is not supported for keycloak users");
+        }
+
+        if(!passwordEncoder.matches(request.currentPassword(),user.getPasswordHash())){
+            throw new InvalidCredentialsException("Current password is incorrect");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        authUserRepository.save(user);
+
+        refreshTokenRepository.revokeAllByUserId(user.getUserId());
     }
 
 }

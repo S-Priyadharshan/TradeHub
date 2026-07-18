@@ -64,4 +64,10 @@ public class AuthController {
         return ResponseEntity.ok("Protected");
     }
 
+    @PatchMapping("/password")
+    public ResponseEntity<Void> changePassword(@RequestBody ChangePasswordRequest request){
+        authService.changePassword(request);
+        return ResponseEntity.ok().build();
+    }
+
 }

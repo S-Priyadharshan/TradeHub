@@ -1,6 +1,7 @@
 package com.pd.auth_service.filter;
 
 import com.pd.auth_service.config.CustomUserDetailsService;
+import com.pd.auth_service.exception.AuthException;
 import com.pd.auth_service.service.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -33,19 +34,23 @@ public class JwtFilter extends OncePerRequestFilter {
         if(header!=null && header.startsWith("Bearer ")){
             String token = header.substring(7);
 
-            String username = jwtService.extractUsername(token);
+            try{
+                String username = jwtService.extractUsername(token);
 
-            UserDetails userDetails = customUserDetailsService.loadUserByUsername(username);
+                UserDetails userDetails = customUserDetailsService.loadUserByUsername(username);
 
-            UsernamePasswordAuthenticationToken authenticationToken =
-                    new UsernamePasswordAuthenticationToken(
-                            userDetails,
-                            null,
-                            userDetails.getAuthorities()
-                    );
+                UsernamePasswordAuthenticationToken authenticationToken =
+                        new UsernamePasswordAuthenticationToken(
+                                userDetails,
+                                null,
+                                userDetails.getAuthorities()
+                        );
+                SecurityContextHolder.getContext()
+                        .setAuthentication(authenticationToken);
+            }catch(Exception e){
+                throw new AuthException(e.getMessage());
+            }
 
-            SecurityContextHolder.getContext()
-                    .setAuthentication(authenticationToken);
         }
 
         filterChain.doFilter(request,response);

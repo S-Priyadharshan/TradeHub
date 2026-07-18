@@ -8,4 +8,5 @@ public interface AuthService {
     LoginResponse refreshUser(RefreshRequest refreshRequest);
     LoginResponse keycloakLogin(String authCode);
     void logoutUser(LogoutRequest logoutRequest);
+    void changePassword(ChangePasswordRequest request);
 }

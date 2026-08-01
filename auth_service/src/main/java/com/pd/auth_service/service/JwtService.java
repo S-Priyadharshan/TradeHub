@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Base64;
 import java.util.Date;
 import java.util.UUID;
@@ -64,9 +65,9 @@ public class JwtService {
         RefreshToken refreshToken = RefreshToken.builder()
                 .userId(userId)
                 .tokenHash(tokenHash)
-                .expiresAt(LocalDateTime.now().plusDays(7))
+                .expiresAt(LocalDateTime.now(ZoneId.systemDefault()).plusDays(7))
                 .revoked(false)
-                .createdAt(LocalDateTime.now())
+                .createdAt(LocalDateTime.now(ZoneId.systemDefault()))
                 .build();
 
         refreshTokenRepository.save(refreshToken);

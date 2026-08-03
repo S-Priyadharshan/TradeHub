@@ -7,6 +7,7 @@ import com.pd.auth_service.domain.entity.RefreshToken;
 import com.pd.auth_service.domain.enums.AccountStatus;
 import com.pd.auth_service.domain.enums.AuthProvider;
 import com.pd.auth_service.domain.enums.Role;
+import com.pd.auth_service.domain.event.UserRegisteredEvent;
 import com.pd.auth_service.exception.AccountSuspendedException;
 import com.pd.auth_service.exception.InvalidTokenException;
 import com.pd.auth_service.exception.InvalidCredentialsException;
@@ -18,6 +19,7 @@ import com.pd.auth_service.service.JwtService;
 import com.pd.auth_service.service.UserProvisioningService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -28,6 +30,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -49,6 +52,8 @@ public class AuthServiceImpl implements AuthService {
     @Value("${oauth.client-secret}")
     private String clientSecret;
 
+    private final KafkaTemplate<String, UserRegisteredEvent> kafkaTemplate;
+
     @Override
     public SignupResponse signupUser(SignupRequest signupRequest){
 
@@ -59,10 +64,20 @@ public class AuthServiceImpl implements AuthService {
                 .authProvider(AuthProvider.LOCAL)
                 .accountStatus(AccountStatus.ACTIVE)
                 .role(Role.USER)
-                .lastLoginAt(LocalDateTime.now())
+                .lastLoginAt(LocalDateTime.now(ZoneId.systemDefault()))
                 .build();
 
         AuthUser savedUser = authUserRepository.save(user);
+
+        UserRegisteredEvent event = new UserRegisteredEvent(
+                savedUser.getUserId(),
+                savedUser.getUsername(),
+                savedUser.getEmail(),
+                savedUser.getCreatedAt(),
+                savedUser.getAuthProvider());
+
+        kafkaTemplate.send("user-registered",savedUser.getUserId().toString(),event);
+
         return authMapper.toDto(savedUser);
     }
 
@@ -98,7 +113,7 @@ public class AuthServiceImpl implements AuthService {
             throw new InvalidTokenException("Refresh Token is revoked");
         }
 
-        if(storedToken.getExpiresAt().isBefore(LocalDateTime.now())){
+        if(storedToken.getExpiresAt().isBefore(LocalDateTime.now(ZoneId.systemDefault()))){
             throw new InvalidTokenException("Refresh Token is expired");
         }
 

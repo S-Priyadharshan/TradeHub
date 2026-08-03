@@ -1,6 +1,7 @@
 package com.pd.user_service.domain.entity;
 
 import com.pd.user_service.domain.enums.AccountStatus;
+import com.pd.user_service.domain.enums.Role;
 import jakarta.persistence.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
@@ -17,10 +18,10 @@ public class User {
     @Column(name = "id", updatable=false, nullable = false)
     private UUID id;
 
-    @Column(name = "username", nullable = false)
+    @Column(name = "username", nullable = false, unique = true)
     private String username;
 
-    @Column(name = "email", nullable = false)
+    @Column(name = "email", nullable = false, unique = true)
     private String email;
 
     @Column(name = "full_name")
@@ -35,6 +36,10 @@ public class User {
     @Column(name = "account_status", nullable = false)
     @Enumerated(EnumType.STRING)
     private AccountStatus accountStatus;
+
+    @Column(name = "role",nullable = false)
+    @Enumerated(EnumType.STRING)
+    private Role role;
 
     @CreatedDate
     @Column(name = "created_at", updatable = false, nullable = false)

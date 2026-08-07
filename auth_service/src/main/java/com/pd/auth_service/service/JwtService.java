@@ -34,6 +34,7 @@ public class JwtService {
                 .claim("username",user.getUsername())
                 .claim("role",user.getRole().name())
                 .claim("provider",user.getAuthProvider().name())
+                .claim("status",user.getAccountStatus().name())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis()+1000*60*15))
                 .signWith(Keys.hmacShaKeyFor(secret.getBytes()))

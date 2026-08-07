@@ -1,8 +1,10 @@
 package com.pd.user_service.domain.entity;
 
 import com.pd.user_service.domain.enums.AccountStatus;
+import com.pd.user_service.domain.enums.AuthProvider;
 import com.pd.user_service.domain.enums.Role;
 import jakarta.persistence.*;
+import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 
@@ -12,11 +14,18 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "users")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@EqualsAndHashCode(onlyExplicitlyIncluded = true)
 public class User {
 
+    @EqualsAndHashCode.Include
     @Id
-    @Column(name = "id", updatable=false, nullable = false)
-    private UUID id;
+    @Column(name = "id", updatable=false, nullable = false, unique = true)
+    private UUID userId;
 
     @Column(name = "username", nullable = false, unique = true)
     private String username;
@@ -33,14 +42,11 @@ public class User {
     @Column(name = "date_of_birth")
     private LocalDate dateOfBirth;
 
-    @Column(name = "account_status", nullable = false)
+    @Column(name = "auth_provider",nullable = false)
     @Enumerated(EnumType.STRING)
-    private AccountStatus accountStatus;
+    private AuthProvider authProvider;
 
-    @Column(name = "role",nullable = false)
-    @Enumerated(EnumType.STRING)
-    private Role role;
-
+    @EqualsAndHashCode.Include
     @CreatedDate
     @Column(name = "created_at", updatable = false, nullable = false)
     private LocalDateTime createdAt;

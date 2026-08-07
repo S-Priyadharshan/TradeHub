@@ -24,7 +24,7 @@ public class AuthUser {
     @EqualsAndHashCode.Include
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(name = "id",updatable = false,nullable = false)
+    @Column(name = "id",updatable = false,nullable = false,unique = true)
     private UUID userId;
 
     @Column(name="keycloak_id",updatable=false)

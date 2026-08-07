@@ -10,6 +10,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.UUID;
 
 @Component
@@ -34,7 +35,7 @@ public class UserProvisioningService {
     private AuthUser linkKeycloakAccount(AuthUser existingUser,UUID keycloakId){
         existingUser.setKeycloakId(keycloakId);
         existingUser.setAuthProvider(AuthProvider.BOTH);
-        existingUser.setLastLoginAt(LocalDateTime.now());
+        existingUser.setLastLoginAt(LocalDateTime.now(ZoneId.systemDefault()));
         return authUserRepository.save(existingUser);
     }
 
@@ -46,7 +47,7 @@ public class UserProvisioningService {
                 .authProvider(AuthProvider.KEYCLOAK)
                 .accountStatus(AccountStatus.ACTIVE)
                 .role(Role.USER)
-                .lastLoginAt(LocalDateTime.now())
+                .lastLoginAt(LocalDateTime.now(ZoneId.systemDefault()))
                 .build();
         return authUserRepository.save(user);
 

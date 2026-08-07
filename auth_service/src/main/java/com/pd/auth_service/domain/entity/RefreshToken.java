@@ -18,7 +18,7 @@ public class RefreshToken {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(name="token_id",updatable = false,nullable = false)
+    @Column(name="token_id",updatable = false,nullable = false,unique = true)
     private UUID tokenId;
 
     @Column(name = "user_id",updatable = false,nullable = false)

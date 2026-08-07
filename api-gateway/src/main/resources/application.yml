@@ -1,37 +1,5 @@
-#spring:
-#  application:
-#    name: api-gateway
-#  config:
-#    import: optional:configserver:http://localhost:8888
-
-server:
-  port: 8080
-
-eureka:
-  client:
-    serviceUrl:
-      defaultZone: http://localhost:8761/eureka/
-    register-with-eureka: true
-    fetch-registry: true
-
 spring:
   application:
     name: api-gateway
   config:
     import: optional:configserver:http://localhost:8888
-  cloud:
-    gateway:
-      routes:
-        - id: auth_service
-          uri: lb://auth-service
-          predicates:
-            - Path=/api/v1/auth/**
-      discovery:
-        locator:
-          enabled: true
-          lower-case-service-id: true
-
-logging:
-  level:
-    org.springframework.cloud.gateway: TRACE
-    org.springframework.web.reactive: TRACE

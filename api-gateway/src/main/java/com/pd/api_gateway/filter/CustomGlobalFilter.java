@@ -54,6 +54,7 @@ public class CustomGlobalFilter implements GlobalFilter {
                             h.remove("X-User-Provider");
                             h.remove("X-Internal-Gateway");
                             h.remove("X-Request-Token");
+                            h.remove("X-Account-Status");
                         })
                         .header("X-Internal-Gateway",internalSecret)
                         .header("X-Request-Token",jwtToken)
@@ -61,6 +62,7 @@ public class CustomGlobalFilter implements GlobalFilter {
                         .header("X-User-Name",principal.username())
                         .header("X-User-Role",principal.role())
                         .header("X-User-Provider",principal.provider())
+                        .header("X-Account-Status",principal.accountStatus())
                         .build();
 
                 ServerWebExchange mutatedExchange = exchange.mutate()

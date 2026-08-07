@@ -11,6 +11,7 @@ import com.pd.auth_service.domain.event.UserRegisteredEvent;
 import com.pd.auth_service.exception.AccountSuspendedException;
 import com.pd.auth_service.exception.InvalidTokenException;
 import com.pd.auth_service.exception.InvalidCredentialsException;
+import com.pd.auth_service.exception.UserAlreadyExistsException;
 import com.pd.auth_service.mapper.AuthMapper;
 import com.pd.auth_service.repository.AuthUserRepository;
 import com.pd.auth_service.repository.RefreshTokenRepository;
@@ -57,6 +58,14 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public SignupResponse signupUser(SignupRequest signupRequest){
 
+        if(authUserRepository.existsByEmail(signupRequest.email())){
+            throw new UserAlreadyExistsException("Email already in use");
+        }
+
+        if(authUserRepository.existsByUsername(signupRequest.username())){
+            throw new UserAlreadyExistsException("Username already taken");
+        }
+
         AuthUser user = AuthUser.builder()
                 .username(signupRequest.username())
                 .passwordHash(passwordEncoder.encode(signupRequest.password()))
@@ -97,8 +106,15 @@ public class AuthServiceImpl implements AuthService {
             throw new AccountSuspendedException("User account is suspended");
         }
 
+        if(AccountStatus.DEACTIVATED.equals(user.getAccountStatus())){
+            throw new AccountSuspendedException("User account is deactivated");
+        }
+
         String token = jwtService.generateToken(user);
         String refreshToken = jwtService.generateAndPersistRefreshToken(user.getUserId());
+
+        user.setLastLoginAt(LocalDateTime.now(ZoneId.systemDefault()));
+        authUserRepository.save(user);
 
         return authMapper.toLoginResponse(token,900L,refreshToken);
     }
@@ -107,7 +123,7 @@ public class AuthServiceImpl implements AuthService {
     public LoginResponse refreshUser(RefreshRequest refreshRequest){
         String tokenHash = jwtService.hashToken(refreshRequest.refreshToken());
         RefreshToken storedToken = refreshTokenRepository.findByTokenHash(tokenHash)
-                .orElseThrow(()->new InvalidTokenException("Token dosent exist"));
+                .orElseThrow(()->new InvalidTokenException("Token does not exist"));
 
         if(Boolean.TRUE.equals(storedToken.getRevoked())){
             throw new InvalidTokenException("Refresh Token is revoked");
@@ -166,6 +182,9 @@ public class AuthServiceImpl implements AuthService {
 
         String token = jwtService.generateToken(user);
         String refreshToken = jwtService.generateAndPersistRefreshToken(user.getUserId());
+
+        user.setLastLoginAt(LocalDateTime.now(ZoneId.systemDefault()));
+        authUserRepository.save(user);
 
         return authMapper.toLoginResponse(token,900L,refreshToken);
     }

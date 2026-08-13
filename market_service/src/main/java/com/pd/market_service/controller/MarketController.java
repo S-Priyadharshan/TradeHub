@@ -25,12 +25,6 @@ public class MarketController {
         return new ResponseEntity<>(response, HttpStatus.OK);
     }
 
-    @GetMapping("/quote/vantage/{symbol}")
-    public ResponseEntity<QuoteResponse> getVatageQuote(@PathVariable String symbol){
-        QuoteResponse response = marketService.fallbackToAlphaVantage(symbol);
-        return new ResponseEntity<>(response,HttpStatus.OK);
-    }
-
     @GetMapping("/search/{symbol}")
     public ResponseEntity<SymbolSearchResponse> searchSymbol(@PathVariable String symbol){
         SymbolSearchResponse response = marketService.searchSymbol(symbol);

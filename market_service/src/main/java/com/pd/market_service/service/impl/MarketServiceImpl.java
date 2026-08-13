@@ -2,10 +2,14 @@ package com.pd.market_service.service.impl;
 
 import com.pd.market_service.domain.dto.*;
 import com.pd.market_service.domain.enums.QuoteSource;
+import com.pd.market_service.exception.MarketDataUnavailableException;
 import com.pd.market_service.exception.MarketProviderException;
 import com.pd.market_service.exception.MarketServiceException;
 import com.pd.market_service.service.MarketService;
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
@@ -17,6 +21,7 @@ import java.time.Instant;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class MarketServiceImpl implements MarketService {
 
     private final RestClient restClient;
@@ -33,7 +38,11 @@ public class MarketServiceImpl implements MarketService {
 
     private static final String ALPHA_VANTAGE_BASE = "https://www.alphavantage.co/query?";
 
+
+
     @Override
+    @CircuitBreaker(name="finnhub",fallbackMethod = "fallbackToAlphaVantage")
+    @RateLimiter(name="finnhub")
     public QuoteResponse getQuote(String symbol){
 
         Cache cache = cacheManager.getCache("stockQuotes");
@@ -83,8 +92,7 @@ public class MarketServiceImpl implements MarketService {
     }
 
     @Override
-    public QuoteResponse fallbackToAlphaVantage(String symbol){
-
+    public QuoteResponse fetchFromAlphaVantage(String symbol){
         try{
             AlphaVantageQuote quoteResponse = restClient.get()
                     .uri(ALPHA_VANTAGE_BASE +
@@ -108,6 +116,22 @@ public class MarketServiceImpl implements MarketService {
             );
         }catch(RestClientException e){
             throw new MarketServiceException(e.getMessage());
+        }
+    }
+
+    @Override
+    public QuoteResponse fallbackToAlphaVantage(String symbol, Throwable t){
+        log.warn("Finnhub failed for {}, falling back to Alpha Vantage. Reason: {}",
+                symbol, t.getMessage());
+        Cache cache = cacheManager.getCache("stockQuotes");
+        try{
+            return fetchFromAlphaVantage(symbol);
+        }catch(Exception e){
+            QuoteResponse stale = cache.get(symbol,QuoteResponse.class);
+            if(stale!=null){
+                return stale;
+            }
+            throw new MarketDataUnavailableException("All providers and cache exhausted for " + symbol);
         }
     }
 

@@ -7,6 +7,5 @@ public record UserSummaryResponse(
         UUID userId,
         String username,
         String email,
-        String accountStatus,
         LocalDateTime createdAt
 ) {}

@@ -1,6 +1,5 @@
 package com.pd.user_service.domain.dto;
 
-import com.pd.user_service.domain.enums.AccountStatus;
 import com.pd.user_service.domain.enums.AuthProvider;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -32,9 +31,6 @@ public record UserProfileResponse(
         String phoneNumber,
 
         LocalDate dateOfBirth,
-
-        @NotNull(message = "Account status cannot be null")
-        AccountStatus accountStatus,
 
         @NotNull(message = "Authentication provider cannot be null")
         AuthProvider authProvider,

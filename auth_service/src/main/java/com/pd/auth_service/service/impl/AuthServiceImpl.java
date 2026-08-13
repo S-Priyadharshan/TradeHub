@@ -7,11 +7,9 @@ import com.pd.auth_service.domain.entity.RefreshToken;
 import com.pd.auth_service.domain.enums.AccountStatus;
 import com.pd.auth_service.domain.enums.AuthProvider;
 import com.pd.auth_service.domain.enums.Role;
+import com.pd.auth_service.domain.event.UserDeletedEvent;
 import com.pd.auth_service.domain.event.UserRegisteredEvent;
-import com.pd.auth_service.exception.AccountSuspendedException;
-import com.pd.auth_service.exception.InvalidTokenException;
-import com.pd.auth_service.exception.InvalidCredentialsException;
-import com.pd.auth_service.exception.UserAlreadyExistsException;
+import com.pd.auth_service.exception.*;
 import com.pd.auth_service.mapper.AuthMapper;
 import com.pd.auth_service.repository.AuthUserRepository;
 import com.pd.auth_service.repository.RefreshTokenRepository;
@@ -212,4 +210,12 @@ public class AuthServiceImpl implements AuthService {
         refreshTokenRepository.revokeAllByUserId(user.getUserId());
     }
 
+    @Override
+    public void deleteUser(UserDeletedEvent event){
+        AuthUser user = authUserRepository.findByUserId(event.userId())
+                .orElseThrow(()-> new AuthException("User not found"));
+
+        user.setAccountStatus(AccountStatus.DEACTIVATED);
+        authUserRepository.save(user);
+    }
 }

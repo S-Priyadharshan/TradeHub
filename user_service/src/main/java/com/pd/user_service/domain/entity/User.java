@@ -1,8 +1,6 @@
 package com.pd.user_service.domain.entity;
 
-import com.pd.user_service.domain.enums.AccountStatus;
 import com.pd.user_service.domain.enums.AuthProvider;
-import com.pd.user_service.domain.enums.Role;
 import jakarta.persistence.*;
 import lombok.*;
 import org.springframework.data.annotation.CreatedDate;
@@ -54,4 +52,7 @@ public class User {
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 }

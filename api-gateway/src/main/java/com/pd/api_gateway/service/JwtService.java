@@ -24,7 +24,7 @@ public class JwtService {
         return new JwtPrincipal(
                 claims.getSubject(),
                 claims.get("username",String.class),
-                claims.get("roles",String.class),
+                claims.get("role",String.class),
                 claims.get("provider",String.class),
                 claims.get("status",String.class)
         );

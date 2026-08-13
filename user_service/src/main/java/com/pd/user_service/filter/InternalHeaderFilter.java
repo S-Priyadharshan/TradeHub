@@ -22,7 +22,7 @@ public class InternalHeaderFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain) throws ServletException, IOException {
-        String incomingSecret = request.getHeader("X-Internal-Secret");
+        String incomingSecret = request.getHeader("X-Internal-Gateway");
 
         if(incomingSecret==null || !incomingSecret.equals(internalSecret)){
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);

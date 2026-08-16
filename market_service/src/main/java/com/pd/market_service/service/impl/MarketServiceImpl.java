@@ -8,6 +8,7 @@ import com.pd.market_service.exception.MarketServiceException;
 import com.pd.market_service.service.MarketService;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
+import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,9 +40,9 @@ public class MarketServiceImpl implements MarketService {
     private static final String ALPHA_VANTAGE_BASE = "https://www.alphavantage.co/query?";
 
 
-
     @Override
     @CircuitBreaker(name="finnhub",fallbackMethod = "fallbackToAlphaVantage")
+    @Retry(name="finnhub")
     @RateLimiter(name="finnhub")
     public QuoteResponse getQuote(String symbol){
 
@@ -92,6 +93,7 @@ public class MarketServiceImpl implements MarketService {
     }
 
     @Override
+    @RateLimiter(name="alphaVantage")
     public QuoteResponse fetchFromAlphaVantage(String symbol){
         try{
             AlphaVantageQuote quoteResponse = restClient.get()

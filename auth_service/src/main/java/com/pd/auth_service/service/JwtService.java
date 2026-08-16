@@ -3,7 +3,6 @@ package com.pd.auth_service.service;
 import com.pd.auth_service.domain.entity.AuthUser;
 import com.pd.auth_service.domain.entity.RefreshToken;
 import com.pd.auth_service.repository.RefreshTokenRepository;
-import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.RequiredArgsConstructor;
@@ -39,24 +38,6 @@ public class JwtService {
                 .expiration(new Date(System.currentTimeMillis()+1000*60*15))
                 .signWith(Keys.hmacShaKeyFor(secret.getBytes()))
                 .compact();
-    }
-
-    public String extractUsername(String token){
-        return extractClaims(token).get("username",String.class);
-    }
-
-    public String extractUserId(String token){
-        return extractClaims(token).getSubject();
-    }
-
-    public Claims extractClaims(String token){
-
-        return Jwts
-                .parser()
-                .verifyWith(Keys.hmacShaKeyFor(secret.getBytes()))
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
     }
 
     public String generateAndPersistRefreshToken(UUID userId){

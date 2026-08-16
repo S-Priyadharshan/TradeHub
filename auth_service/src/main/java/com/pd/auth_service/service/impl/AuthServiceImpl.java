@@ -1,6 +1,7 @@
 package com.pd.auth_service.service.impl;
 
 import com.pd.auth_service.client.KeycloakClient;
+import com.pd.auth_service.config.CustomUserDetails;
 import com.pd.auth_service.domain.dto.*;
 import com.pd.auth_service.domain.entity.AuthUser;
 import com.pd.auth_service.domain.entity.RefreshToken;
@@ -18,9 +19,13 @@ import com.pd.auth_service.service.JwtService;
 import com.pd.auth_service.service.UserProvisioningService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.LockedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -32,6 +37,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 
 @Service
@@ -42,6 +48,7 @@ public class AuthServiceImpl implements AuthService {
     private final AuthUserRepository authUserRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AuthMapper authMapper;
+    @Lazy
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
     private final KeycloakClient keycloakClient;
@@ -90,31 +97,32 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LoginResponse loginUser(LoginRequest loginRequest){
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        loginRequest.username(),
-                        loginRequest.password()
-                )
-        );
 
-        AuthUser user = authUserRepository.findByUsername(loginRequest.username())
-                .orElseThrow(()-> new UsernameNotFoundException("User not found"));
+        try{
+            Authentication auth = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(
+                            loginRequest.username(),
+                            loginRequest.password()
+                    )
+            );
 
-        if(AccountStatus.SUSPENDED.equals(user.getAccountStatus())){
+            CustomUserDetails principal = (CustomUserDetails) auth.getPrincipal();
+
+            AuthUser user = principal.getAuthUser();
+
+            String token = jwtService.generateToken(user);
+            String refreshToken = jwtService.generateAndPersistRefreshToken(user.getUserId());
+
+            user.setLastLoginAt(LocalDateTime.now(ZoneId.systemDefault()));
+            authUserRepository.save(user);
+
+            return authMapper.toLoginResponse(token, 900L, refreshToken);
+
+        }catch(LockedException ex){
             throw new AccountSuspendedException("User account is suspended");
-        }
-
-        if(AccountStatus.DEACTIVATED.equals(user.getAccountStatus())){
+        }catch(DisabledException ex){
             throw new AccountSuspendedException("User account is deactivated");
         }
-
-        String token = jwtService.generateToken(user);
-        String refreshToken = jwtService.generateAndPersistRefreshToken(user.getUserId());
-
-        user.setLastLoginAt(LocalDateTime.now(ZoneId.systemDefault()));
-        authUserRepository.save(user);
-
-        return authMapper.toLoginResponse(token,900L,refreshToken);
     }
 
     @Override
@@ -189,11 +197,11 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void changePassword(ChangePasswordRequest request){
-        String username = SecurityContextHolder.getContext()
+        String userId = SecurityContextHolder.getContext()
                 .getAuthentication()
                 .getName();
 
-        AuthUser user = authUserRepository.findByUsername(username)
+        AuthUser user = authUserRepository.findByUserId(UUID.fromString(userId))
                 .orElseThrow(()->new UsernameNotFoundException("User not found"));
 
         if(AuthProvider.KEYCLOAK.equals(user.getAuthProvider())){

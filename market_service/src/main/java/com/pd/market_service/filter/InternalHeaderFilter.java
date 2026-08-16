@@ -1,17 +1,13 @@
-package com.pd.auth_service.filter;
+package com.pd.market_service.filter;
 
-import com.pd.auth_service.exception.AuthException;
-import com.pd.auth_service.service.JwtService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -19,10 +15,7 @@ import java.io.IOException;
 import java.util.List;
 
 @Component
-@RequiredArgsConstructor
-public class JwtFilter extends OncePerRequestFilter {
-
-    private final JwtService jwtService;
+public class InternalHeaderFilter extends OncePerRequestFilter {
 
     @Value("${HEADER_SECRET}")
     private String internalSecret;
@@ -38,26 +31,17 @@ public class JwtFilter extends OncePerRequestFilter {
             return;
         }
 
-        List<String> publicPaths = List.of(
-                "/api/v1/auth/login",
-                "/api/v1/auth/signup",
-                "/api/v1/auth/refresh",
-                "/api/v1/auth/keycloak/exchange"
-        );
+        String userId = request.getHeader("X-User-Id");
+        String role = request.getHeader("X-User-Role");
 
-        if(!publicPaths.contains(request.getRequestURI())){
-            String userId = request.getHeader("X-User-Id");
-            String role = request.getHeader("X-User-Role");
-
-            if(userId!=null && role!=null){
-                UsernamePasswordAuthenticationToken authToken =
-                        new UsernamePasswordAuthenticationToken(
-                                userId,
-                                null,
-                                List.of(new SimpleGrantedAuthority("ROLE_"+role))
-                        );
-                SecurityContextHolder.getContext().setAuthentication(authToken);
-            }
+        if(userId!=null && role!=null){
+            UsernamePasswordAuthenticationToken authToken =
+                    new UsernamePasswordAuthenticationToken(
+                            userId,
+                            null,
+                            List.of(new SimpleGrantedAuthority("ROLE_"+role))
+                    );
+            SecurityContextHolder.getContext().setAuthentication(authToken);
         }
 
         filterChain.doFilter(request,response);

@@ -33,8 +33,25 @@ public class CustomGlobalFilter implements GlobalFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
 
+        ServerHttpRequest sanitizedRequest = exchange.getRequest().mutate()
+                .headers(h->{
+                    h.remove("X-User-Id");
+                    h.remove("X-User-Role");
+                    h.remove("X-User-Name");
+                    h.remove("X-User-Provider");
+                    h.remove("X-Internal-Gateway");
+                    h.remove("X-Request-Token");
+                    h.remove("X-Account-Status");
+                })
+                .header("X-Internal-Gateway",internalSecret)
+                .build();
+
+        ServerWebExchange sanitizedExchange = exchange.mutate()
+                .request(sanitizedRequest)
+                .build();
+
         if(publicPaths.contains(exchange.getRequest().getURI().getPath())){
-            return chain.filter(exchange);
+            return chain.filter(sanitizedExchange);
         }
 
         String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
@@ -46,17 +63,7 @@ public class CustomGlobalFilter implements GlobalFilter {
                 JwtPrincipal principal = jwtService.validateAndExtractClaims(jwtToken);
 
                 // make sure to remove/sanitize any client supplied headers
-                ServerHttpRequest modifiedRequest = exchange.getRequest().mutate()
-                        .headers(h->{
-                            h.remove("X-User-Id");
-                            h.remove("X-User-Role");
-                            h.remove("X-User-Name");
-                            h.remove("X-User-Provider");
-                            h.remove("X-Internal-Gateway");
-                            h.remove("X-Request-Token");
-                            h.remove("X-Account-Status");
-                        })
-                        .header("X-Internal-Gateway",internalSecret)
+                ServerHttpRequest modifiedRequest = sanitizedExchange.getRequest().mutate()
                         .header("X-Request-Token",jwtToken)
                         .header("X-User-Id",principal.userId())
                         .header("X-User-Name",principal.username())

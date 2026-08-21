@@ -1,8 +1,7 @@
 package com.pd.portfolio_service.controller;
 
 import com.pd.portfolio_service.domain.dto.ErrorDto;
-import com.pd.portfolio_service.exception.InvalidSymbolException;
-import com.pd.portfolio_service.exception.PortfolioServiceException;
+import com.pd.portfolio_service.exception.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -15,6 +14,34 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidSymbolException.class)
     public ResponseEntity<ErrorDto> handleInvalidSymbolException(InvalidSymbolException ex){
+        log.error("Caught Exception",ex);
+        ErrorDto errorDto = new ErrorDto(ex.getMessage());
+        return new ResponseEntity<>(errorDto, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(HoldingNotFoundException.class)
+    public ResponseEntity<ErrorDto> handleHoldingNotFoundException(HoldingNotFoundException ex){
+        log.error("Caught Exception",ex);
+        ErrorDto errorDto = new ErrorDto(ex.getMessage());
+        return new ResponseEntity<>(errorDto, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(InsufficientFundsException.class)
+    public ResponseEntity<ErrorDto> handleInsufficientFundsException(InsufficientFundsException ex){
+        log.error("Caught Exception",ex);
+        ErrorDto errorDto = new ErrorDto(ex.getMessage());
+        return new ResponseEntity<>(errorDto, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(InsufficientSharesException.class)
+    public ResponseEntity<ErrorDto> handleInsufficientSharesException(InsufficientSharesException ex){
+        log.error("Caught Exception",ex);
+        ErrorDto errorDto = new ErrorDto(ex.getMessage());
+        return new ResponseEntity<>(errorDto, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(PortfolioNotFoundException.class)
+    public ResponseEntity<ErrorDto> handlePortfolioNotFoundException(PortfolioNotFoundException ex){
         log.error("Caught Exception",ex);
         ErrorDto errorDto = new ErrorDto(ex.getMessage());
         return new ResponseEntity<>(errorDto, HttpStatus.BAD_REQUEST);

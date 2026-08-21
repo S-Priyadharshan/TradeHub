@@ -6,7 +6,7 @@ import com.pd.portfolio_service.domain.entity.Portfolio;
 import com.pd.portfolio_service.domain.entity.Trade;
 import org.mapstruct.Mapper;
 import org.mapstruct.ReportingPolicy;
-import org.springframework.data.domain.Page;
+
 
 import java.util.List;
 
@@ -16,7 +16,7 @@ public interface PortfolioMapper {
     HoldingResponse toResponse(Holding holding);
     List<HoldingResponse> toHoldingResponseList(List<Holding> holdings);
     CashBalanceResponse toCashBalanceResponse(Portfolio portfolio);
+    ListTradeResponse toListTradeResponse(Trade trade);
     TradeResponse toTradeResponse(Trade trade);
-    Page<ListTradeResponse> toTradeResponseList(Page<Trade> trades);
     TradeEvent toTradeEvent(Trade trade);
 }

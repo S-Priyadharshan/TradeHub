@@ -19,7 +19,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -62,7 +61,7 @@ public class PortfolioServiceImpl implements PortfolioService {
 
     @Override
     @Transactional
-    public TradeResponse executeBuy(TradeRequest tradeRequest) {
+    public TradeResponse executeBuy(TradeRequest tradeRequest,UUID userId) {
         SymbolValidationResponse validationResponse = marketServiceClient.validateSymbol(tradeRequest.symbol());
 
         if (!validationResponse.valid()) {
@@ -71,10 +70,7 @@ public class PortfolioServiceImpl implements PortfolioService {
 
         QuoteResponse quoteResponse = marketServiceClient.getQuote(tradeRequest.symbol());
 
-        String userId = SecurityContextHolder.getContext()
-                .getAuthentication().getName();
-
-        Portfolio portfolio = portfolioRepository.findById(UUID.fromString(userId))
+        Portfolio portfolio = portfolioRepository.findById(userId)
                 .orElseThrow(() -> new PortfolioNotFoundException("Portfolio not found"));
 
         BigDecimal totalPrice = tradeRequest.quantity().multiply(quoteResponse.currentPrice());
@@ -86,21 +82,80 @@ public class PortfolioServiceImpl implements PortfolioService {
         portfolio.setCashBalance(portfolio.getCashBalance().subtract(totalPrice));
 
         Holding holding = holdingRepository.findByPortfolioIdAndSymbol(portfolio.getUserId(), tradeRequest.symbol())
-                .orElseGet(() -> {
-                    return Holding.builder()
+                .orElseGet(() -> Holding.builder()
                             .portfolioId(portfolio.getUserId())
                             .symbol(tradeRequest.symbol())
                             .quantity(BigDecimal.ZERO)
                             .averageCostBasis(BigDecimal.ZERO)
-                            .build();
-                });
+                            .build()
+                );
 
         holding.computeAverageCostBasis(totalPrice, tradeRequest.quantity());
         holding.increaseQuantity(tradeRequest.quantity());
 
-        Trade trade = new Trade(UUID.fromString(userId),
+        holdingRepository.save(holding);
+
+        Trade trade = new Trade(userId,
                 tradeRequest.symbol(),
                 TradeType.BUY,
+                tradeRequest.quantity(),
+                quoteResponse.currentPrice(),
+                totalPrice,
+                LocalDateTime.now(ZoneId.systemDefault())
+        );
+
+        Trade savedTrade = tradeRepository.save(trade);
+
+        TradeEvent tradeEvent = portfolioMapper.toTradeEvent(savedTrade);
+
+        kafkaTemplate.send("trade-event",savedTrade.getTradeId().toString(),tradeEvent);
+
+        return new TradeResponse(savedTrade.getTradeId(),
+                savedTrade.getSymbol(),
+                savedTrade.getTradeType(),
+                savedTrade.getQuantity(),
+                savedTrade.getPricePerUnit(),
+                savedTrade.getTotalAmount(),
+                portfolio.getCashBalance(),
+                savedTrade.getExecutedAt()
+        );
+    }
+
+    @Override
+    @Transactional
+    public TradeResponse executeSell(TradeRequest tradeRequest,UUID userId) {
+
+        Holding holding = holdingRepository.findByPortfolioIdAndSymbol(userId, tradeRequest.symbol())
+                .orElseThrow(() -> new HoldingNotFoundException(
+                        String.format("Holding for user %s with symbol %s not found", userId, tradeRequest.symbol()))
+                );
+
+        if (holding.getQuantity().compareTo(tradeRequest.quantity()) < 0) {
+            throw new InsufficientSharesException("User does not have sufficient shares");
+        }
+
+        Portfolio portfolio = portfolioRepository.findById(userId)
+                .orElseThrow(() -> new PortfolioNotFoundException(
+                        String.format("Porfolio of user with id %s not found", userId))
+                );
+
+        QuoteResponse quoteResponse = marketServiceClient.getQuote(tradeRequest.symbol());
+
+        BigDecimal totalPrice = tradeRequest.quantity().multiply(quoteResponse.currentPrice());
+
+        portfolio.setCashBalance(portfolio.getCashBalance().add(totalPrice));
+
+        holding.decreaseQuantity(tradeRequest.quantity());
+
+        if (holding.getQuantity().compareTo(BigDecimal.ZERO) == 0) {
+            holdingRepository.deleteById(holding.getId());
+        }else{
+            holdingRepository.save(holding);
+        }
+
+        Trade trade = new Trade(userId,
+                tradeRequest.symbol(),
+                TradeType.SELL,
                 tradeRequest.quantity(),
                 quoteResponse.currentPrice(),
                 totalPrice,
@@ -124,71 +179,16 @@ public class PortfolioServiceImpl implements PortfolioService {
     }
 
     @Override
-    @Transactional
-    public TradeResponse executeSell(TradeRequest tradeRequest) {
+    public List<HoldingResponse> fetchHoldings(UUID userId) {
 
-        String userId = SecurityContextHolder.getContext()
-                .getAuthentication().getName();
-
-        Holding holding = holdingRepository.findByPortfolioIdAndSymbol(UUID.fromString(userId), tradeRequest.symbol())
-                .orElseThrow(() -> new HoldingNotFoundException(
-                        String.format("Holding for user %s with symbol %s not found", userId, tradeRequest.symbol()))
-                );
-
-        if (holding.getQuantity().compareTo(tradeRequest.quantity()) < 0) {
-            throw new InsufficientSharesException("User does not have sufficient shares");
-        }
-
-        Portfolio portfolio = portfolioRepository.findById(UUID.fromString(userId))
-                .orElseThrow(() -> new PortfolioNotFoundException(
-                        String.format("Porfolio of user with id %s not found", userId))
-                );
-
-        QuoteResponse quoteResponse = marketServiceClient.getQuote(tradeRequest.symbol());
-
-        BigDecimal totalPrice = tradeRequest.quantity().multiply(quoteResponse.currentPrice());
-
-        portfolio.setCashBalance(portfolio.getCashBalance().add(totalPrice));
-
-        holding.decreaseQuantity(tradeRequest.quantity());
-
-        if (holding.getQuantity().compareTo(BigDecimal.ZERO) == 0) {
-            holdingRepository.deleteById(holding.getId());
-        }
-
-        Trade trade = new Trade(UUID.fromString(userId),
-                tradeRequest.symbol(),
-                TradeType.SELL,
-                tradeRequest.quantity(),
-                quoteResponse.currentPrice(),
-                totalPrice,
-                LocalDateTime.now(ZoneId.systemDefault()));
-
-        Trade savedTrade = tradeRepository.save(trade);
-
-        return new TradeResponse(savedTrade.getTradeId(),
-                savedTrade.getSymbol(),
-                savedTrade.getTradeType(),
-                savedTrade.getQuantity(),
-                savedTrade.getPricePerUnit(),
-                savedTrade.getTotalAmount(),
-                portfolio.getCashBalance(),
-                savedTrade.getExecutedAt()
-        );
-    }
-
-    @Override
-    public List<HoldingResponse> fetchHoldings(String userId) {
-        UUID portfolioId = UUID.fromString(userId);
-
-        List<Holding> holdings = holdingRepository.findByPortfolioId(portfolioId);
+        List<Holding> holdings = holdingRepository.findByPortfolioId(userId);
 
         return portfolioMapper.toHoldingResponseList(holdings);
     }
 
     @Override
-    public CashBalanceResponse fetchCashBalance(String userId) {
-        Portfolio portfolio = portfolioRepository.findById(UUID.fromString(userId))
+    public CashBalanceResponse fetchCashBalance(UUID userId) {
+        Portfolio portfolio = portfolioRepository.findById(userId)
                 .orElseThrow(() -> new PortfolioNotFoundException(
                         String.format("Portfolio for user with id %s not found", userId)
                 ));
@@ -196,17 +196,17 @@ public class PortfolioServiceImpl implements PortfolioService {
     }
 
     @Override
-    public Page<ListTradeResponse> fetchAllTrades(String userId, Pageable pageable) {
-        Page<Trade> trades = tradeRepository.findByUserId(UUID.fromString(userId), pageable);
-        return portfolioMapper.toTradeResponseList(trades);
+    public Page<ListTradeResponse> fetchAllTrades(UUID userId, Pageable pageable) {
+        Page<Trade> trades = tradeRepository.findByUserId(userId, pageable);
+        return trades.map(portfolioMapper::toListTradeResponse);
     }
 
     @Override
-    public SummaryResponse fetchSummary(String userId) {
-        Portfolio portfolio = portfolioRepository.findById(UUID.fromString(userId))
+    public SummaryResponse fetchSummary(UUID userId) {
+        Portfolio portfolio = portfolioRepository.findById(userId)
                 .orElseThrow(()-> new PortfolioNotFoundException("Portfolio not found"));
 
-        List<Holding> holdings = holdingRepository.findByPortfolioId(UUID.fromString(userId));
+        List<Holding> holdings = holdingRepository.findByPortfolioId(userId);
 
         BigDecimal holdingsValue = holdings
                 .stream()

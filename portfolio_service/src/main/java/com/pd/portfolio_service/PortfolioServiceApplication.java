@@ -1,4 +1,4 @@
-package com.pd.auth_service;
+package com.pd.portfolio_service;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -8,11 +8,11 @@ import java.util.TimeZone;
 
 @SpringBootApplication
 @EnableFeignClients
-public class AuthServiceApplication {
+public class PortfolioServiceApplication {
 
 	public static void main(String[] args) {
 		TimeZone.setDefault(TimeZone.getTimeZone("Asia/Kolkata"));
-		SpringApplication.run(AuthServiceApplication.class, args);
+		SpringApplication.run(PortfolioServiceApplication.class, args);
 	}
 
 }

@@ -19,7 +19,6 @@ import com.pd.auth_service.service.JwtService;
 import com.pd.auth_service.service.UserProvisioningService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.DisabledException;
@@ -48,7 +47,6 @@ public class AuthServiceImpl implements AuthService {
     private final AuthUserRepository authUserRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AuthMapper authMapper;
-    @Lazy
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
     private final KeycloakClient keycloakClient;

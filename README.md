@@ -85,3 +85,53 @@ sequenceDiagram
 
     note over Auth,Kafka: New local signups also publish "user-registered"<br/>consumed independently by User + Portfolio services
 ```
+
+## Gateway Zero-Trust Header Flow
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant GW as API Gateway
+    participant Auth as Downstream Service
+
+    Client->>GW: Request + Authorization: Bearer <JWT>
+
+    GW->>GW: Strip any client-supplied X-User-*,<br/>X-Internal-Gateway, X-Request-Token headers
+
+    alt path is public (login/signup/refresh)
+        GW->>Auth: Forward (no JWT required)
+    else path requires auth
+        GW->>GW: jwtService.validateAndExtractClaims(token)
+        alt token invalid or missing
+            GW-->>Client: 401 Unauthorized
+        else token valid
+            GW->>GW: Inject X-User-Id, X-User-Role,<br/>X-User-Name, X-User-Provider,<br/>X-Account-Status, X-Internal-Gateway
+            GW->>Auth: Forward with trusted headers
+            Auth->>Auth: Trust headers (no re-validation)<br/>InternalHeaderFilter checks X-Internal-Gateway secret
+        end
+    end
+```
+
+## Kafka Fan-Out on User Registration
+
+```mermaid
+sequenceDiagram
+    participant Auth as Auth Service
+    participant Kafka
+    participant User as User Service
+    participant Portfolio as Portfolio Service
+
+    Auth->>Auth: signupUser() persists AuthUser
+    Auth->>Kafka: publish "user-registered" (userId, username, email, provider)
+
+    par independent consumers
+        Kafka->>User: @KafkaListener (group: user-service-group)
+        User->>User: userService.createUser(event)
+    and
+        Kafka->>Portfolio: @KafkaListener (group: portfolio-service-group)
+        Portfolio->>Portfolio: portfolioService.createPortfolio(event)
+    end
+
+    note over User,Portfolio: Auth has no knowledge of these consumers —<br/>new services can subscribe without touching Auth
+```
+

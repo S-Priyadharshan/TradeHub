@@ -610,4 +610,4 @@ The main goal is to understand the reasoning behind the architecture:
 
 That reasoning is what the diagrams and implementation are intended to document.
 
-Thank you for looking through the repository and if you are someone who's looking to build a sample microservices project for learning purposes then I hope this can serve as a demonstration on how to approach such a project. 
+Thank you for looking through the repository (<3) and if you are someone who's looking to build a sample microservices project for learning purposes then I hope this can serve as a demonstration on how to approach such a project. 

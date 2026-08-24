@@ -1,15 +1,43 @@
-Welcome to TradeHub
+# TradeHub
 
-This is a microservices based project that takes the context of a paper trading web app to demonstrate some aspects of real world design 
+TradeHub is a **microservices-based paper trading platform** built to explore real-world backend architecture, distributed systems, service boundaries, event-driven communication, resilience, authentication, and data consistency.
 
-HLD:
+The application domain is intentionally simple: users can manage virtual portfolios and execute paper trades using market data.
 
--- Leave the space for image and any other introduction
+The engineering problems are the focus.
 
-Services:
--- Small introduction about the various Services
+---
 
-Control Flows:
+## Architecture
+
+### High-Level Design
+
+<img width="1172" height="608" alt="image" src="https://github.com/user-attachments/assets/e3f5ab79-1f9f-473b-9966-c1427c655043" />
+
+---
+
+## Service Overview
+
+| Component | Responsibility |
+|---|---|
+| **API Gateway** | Single entry point for external traffic, JWT validation, identity propagation, and request routing |
+| **Auth Service** | Local authentication, JWT issuance, refresh-token management, Keycloak OAuth2 integration, and account state |
+| **User Service** | Stores and manages user profile information |
+| **Portfolio Service** | Handles portfolios, holdings, trade execution, and portfolio state |
+| **Market Service** | Provides market quotes and symbol validation with caching and provider resilience |
+| **Config Server** | Centralized configuration for the microservices |
+| **Eureka Server** | Service discovery and registration |
+| **Kafka** | Event-driven communication between independently evolving services |
+| **PostgreSQL** | Transactional persistence for authentication, user, and portfolio data |
+| **Redis** | Low-latency market-data caching |
+
+The services are deliberately separated by **business responsibility and data ownership** rather than by technical layers.
+
+---
+
+# Control Flows
+
+The following flows illustrate how the major parts of the system interact.
 
 ## Buy Trade Flow
 
@@ -57,7 +85,19 @@ sequenceDiagram
     PS-->>Client: 200 TradeResponse (updated cashBalance)
 ```
 
-## Dual-Path Auth Flow
+### What this flow demonstrates
+
+- Synchronous service-to-service communication for market validation and pricing
+- Transactional portfolio updates
+- Separate `Portfolio`, `Holding`, and `Trade` persistence
+- An immutable trade ledger
+- Asynchronous event publication after trade processing
+
+---
+
+## Dual-Path Authentication Flow
+
+TradeHub supports both local authentication and Keycloak-based OAuth2 authentication while normalizing both paths into a single internal JWT format.
 
 ```mermaid
 sequenceDiagram
@@ -98,7 +138,19 @@ sequenceDiagram
     note over Auth,Kafka: New local signups also publish "user-registered"<br/>consumed independently by User + Portfolio services
 ```
 
-## Gateway Zero-Trust Header Flow
+### Identity reconciliation
+
+When an existing local user later authenticates through Keycloak, the Auth Service checks the user's email before creating a new identity.
+
+If a matching local account exists, the Keycloak identity is linked to that account instead of creating a duplicate user.
+
+This keeps a single TradeHub identity across multiple authentication methods.
+
+---
+
+## Gateway Trust Flow
+
+The API Gateway acts as the external trust boundary.
 
 ```mermaid
 sequenceDiagram
@@ -108,12 +160,13 @@ sequenceDiagram
 
     Client->>GW: Request + Authorization: Bearer <JWT>
 
-    GW->>GW: Strip any client-supplied X-User-*,<br/>X-Internal-Gateway, X-Request-Token headers
+    GW->>GW: Strip client-supplied X-User-*,<br/>X-Internal-Gateway, X-Request-Token headers
 
     alt path is public (login/signup/refresh)
         GW->>Auth: Forward (no JWT required)
     else path requires auth
         GW->>GW: jwtService.validateAndExtractClaims(token)
+
         alt token invalid or missing
             GW-->>Client: 401 Unauthorized
         else token valid
@@ -124,7 +177,17 @@ sequenceDiagram
     end
 ```
 
+The important property is that downstream services do not need to re-parse JWTs or query the Auth Service for every request.
+
+The gateway validates the external identity and propagates the verified identity context internally.
+
+> **Known limitation:** the shared internal gateway secret is an application-level trust mechanism rather than a full production service-identity solution such as mTLS or workload identity.
+
+---
+
 ## Kafka Fan-Out on User Registration
+
+A user registration event is published once and consumed independently by downstream services.
 
 ```mermaid
 sequenceDiagram
@@ -144,120 +207,407 @@ sequenceDiagram
         Portfolio->>Portfolio: portfolioService.createPortfolio(event)
     end
 
-    note over User,Portfolio: Auth has no knowledge of these consumers —<br/>new services can subscribe without touching Auth
+    note over User,Portfolio: Auth has no knowledge of these consumers —<br/>new services can subscribe without modifying Auth
 ```
 
-Design Decisions
-# TradeHub — Architecture Notes
+This is intentionally fan-out rather than a chain of direct service calls.
 
-## Key Design Decisions
-
-**Dual authentication with a single token issuer.** TradeHub supports both local username/password auth and Keycloak OAuth login, but all downstream services only ever see one token format. The Auth Service acts as the single JWT issuer — for local logins it verifies credentials and mints a JWT directly; for Keycloak logins it validates the Keycloak token via JWKS, performs JIT provisioning, and exchanges it for an identically shaped internal JWT. This means zero divergence in how Portfolio, Market, or any other service handles authentication regardless of how the user originally signed up.
-
-**Gateway as the sole trust boundary.** All external traffic flows through Spring Cloud Gateway on port 8080. The gateway validates the JWT, strips any client-supplied internal headers, injects verified identity headers (`X-User-Id`, `X-User-Role`, `X-Account-Status`, `X-Internal-Gateway`), and forwards to the appropriate service. Downstream services trust only requests carrying the internal gateway secret — they never re-validate JWTs and never hit the Auth DB to resolve identity. This removes per-service authentication overhead and keeps authorization logic in one place.
-
-**Auth Service owns authentication state; User Service owns profile data.** Account status (`ACTIVE`, `SUSPENDED`) lives in Auth Service and travels in the JWT. User Service stores only profile-level data — username, email, full name, auth provider. Role assignment and suspension are Auth Service concerns exclusively. This prevents the dual-ownership problem where two services disagree on whether a user can log in.
-
-**Refresh token rotation with hashed storage.** Refresh tokens are random UUIDs stored as SHA-256 hashes — the raw token is sent to the client, the hash lives in the DB. On every refresh call the old token is revoked and a new pair is issued. A stolen refresh token is single-use before invalidation.
-
-**JIT provisioning for Keycloak users.** The first time a Keycloak-authenticated user hits the `/keycloak/exchange` endpoint, Auth Service extracts their `sub` claim and email, creates a local `auth_users` row with `ROLE_USER` and `ACTIVE` status, then mints an internal JWT. Subsequent logins skip creation and go straight to token minting. User Service receives a `UserRegisteredEvent` over Kafka regardless of auth path — the provisioning trigger is always Kafka, never a direct call.
-
-**Portfolio entities as separate aggregate roots.** Portfolio, Holding, and Trade are three distinct JPA entities with no ORM-managed relationships between them. Cross-aggregate references are bare UUID columns, not `@ManyToOne` / `@OneToMany` mappings. This eliminates accidental cascade operations, N+1 loading surprises, and transaction scope bleed between aggregates. Each repository owns exactly one table.
-
-**Derived portfolio value is never persisted.** `totalWorth` = cash balance + (sum of holdings × live prices) is computed on read, never stored. Storing it would require updating every affected user's Portfolio row on every market price tick — an O(users × holdings) write problem on every quote update. The computation is cheap at read time given live prices are already cached in Redis.
-
-**Market data with provider fallback and cache.** Finnhub is the primary quote source. On circuit breaker open or rate limit hit, the service falls back to Alpha Vantage. Both providers have independent Resilience4j rate limiters reflecting their respective free-tier limits. Redis caches quotes with a 15-second TTL — stale cache is the last resort if both providers are unavailable.
+A new consumer can subscribe to the same event without requiring changes to the producer.
 
 ---
 
-## Engineering Challenges
+# Key Design Decisions
 
-**AuthenticationManager circular proxy in Spring Boot 4.** Exposing `AuthenticationManager` as a `@Bean` from the same `SecurityConfig` that builds the `SecurityFilterChain` creates an AOP proxy that delegates back to itself, producing a `StackOverflowError` at runtime. The fix is separating the `AuthenticationManager` bean into its own configuration class so it has no involvement in building the filter chain.
+## Dual authentication with a single token issuer
 
-**JWT filter running on public endpoints.** Spring Security's `permitAll()` controls authorization, not filter execution. A custom `OncePerRequestFilter` registered via `addFilterBefore` runs on every request regardless of path rules. Public endpoints like `/auth/login` were hitting the internal header check and returning 403. Resolved by overriding `shouldNotFilter()` to return early for whitelisted paths.
+TradeHub supports both local username/password authentication and Keycloak OAuth2.
 
-**Redis deserialization with Jackson 3.** Spring Boot 4 ships with Jackson 3, which relocated packages from `com.fasterxml.jackson` to `tools.jackson`. `GenericJacksonJsonRedisSerializer` without explicit type information deserializes cached objects as `LinkedHashMap` rather than the target DTO, throwing `IllegalStateException` on cache retrieval. Resolved using `Jackson2JsonRedisSerializer<QuoteResponse>` with an explicit type parameter, eliminating the need for default typing or `@class` metadata in the stored JSON.
+However, downstream services see only one internal JWT format.
 
-**Gateway not forwarding internal secret to public routes.** The internal secret header was added only inside the JWT validation block, which public paths bypassed entirely. Services receiving public-route requests had no `X-Internal-Gateway` header and returned 403. Fixed by sanitizing and injecting the secret on all requests before the public path short-circuit, so every forwarded request carries the header regardless of whether it required JWT validation.
+For local login, Auth Service verifies credentials and mints the JWT directly.
 
-**Kafka event schema divergence across services.** Auth Service publishes `UserRegisteredEvent` with `authProvider` as a field. User Service needs `authProvider` for profile data. Portfolio Service needs only `userId`, `username`, and `email` to seed a new portfolio. Sharing a single event class across services via a common module would couple them to Auth Service's domain enums. Each service defines its own local version of the event record with only the fields it cares about — Jackson ignores unknown fields during deserialization by default, so the payload is forwards and backwards compatible without coordination.
+For Keycloak login, Auth Service validates the external identity, performs JIT provisioning or account linking, and then mints the same internal JWT format.
 
-**Refresh token as a record.** Java records are fully immutable — a `revoked` flag on a refresh token record cannot be flipped after creation because there are no setters and `updatable = false` would prevent JPA from writing the change anyway. Refresh tokens must be mutable entities to support revocation, so a regular class with Lombok is the correct model despite records being idiomatic for other DTOs in the project.
+This keeps the rest of the system independent of the identity provider.
 
 ---
 
-## Engineering Trade-offs
+## Gateway as the trust boundary
 
-**Internal header secret vs network isolation.** The `X-Internal-Gateway` shared secret provides application-layer service authentication without infrastructure changes. The real-world approach is VPC subnet isolation (services unreachable externally) combined with mTLS for encrypted service-to-service traffic. The header approach is a deliberate simplification: the secret is static, rotation requires a coordinated redeploy of all services, and a compromised secret allows direct service access from inside the network. Documented here as a known limitation rather than an oversight.
+All external traffic enters through Spring Cloud Gateway.
 
-**HS256 vs RS256 for JWT signing.** HMAC-SHA256 requires the same secret on every service that validates tokens. In this architecture that means the gateway and every microservice share one secret, widening the attack surface with each service added. RS256 with asymmetric keys would let Auth Service hold the private key exclusively while all verifiers use the public key — free to distribute, no shared secret risk. HS256 was chosen for implementation simplicity; the migration path to RS256 requires only a key generation step and a config update per service.
+The gateway validates JWTs, removes client-supplied internal headers, extracts identity claims, and injects trusted identity headers before forwarding requests.
 
-**Local DAO auth alongside Keycloak.** Running two auth paths means two sources of credential management, two sets of signup/login code, and the complexity of ensuring both paths produce identical JWT claims. The production pattern is to configure Keycloak as the single front door and run username/password auth inside Keycloak's own user store rather than building it separately. The dual-path approach was retained to demonstrate hand-rolled JWT auth as a portfolio artifact, with this trade-off explicitly acknowledged.
+Downstream services therefore do not need to:
 
-**Soft delete via `deletedAt` timestamp vs a boolean flag.** A `deletedAt` timestamp column is marginally more expensive to index and query against than a boolean `isDeleted` flag but captures when deletion occurred — necessary for GDPR data retention schedules, audit trails, and purge jobs that hard-delete records older than a retention window. `@SQLRestriction("deleted_at IS NULL")` on the entity makes the filter transparent to all queries without adding a `WHERE` clause manually everywhere.
+- validate the JWT again
+- query Auth Service to resolve the user
+- duplicate authentication logic
 
-**Bare UUID FK columns vs JPA-managed relationships across aggregates.** ORM-managed `@ManyToOne` / `@OneToMany` relationships across Portfolio, Holding, and Trade would simplify some query patterns but introduce cascade risks, lazy-loading surprises, and transaction scope coupling between entities that should be independently mutable. A trade execution touches Holding (update quantity and cost basis), Portfolio (update cash balance), and Trade (append new row) — three separate writes that should each be explicit, not triggered implicitly by cascade. Bare UUID columns keep aggregate boundaries honest at the cost of slightly more verbose repository queries.
+The trade-off is that the internal gateway secret is a simplified service-authentication mechanism and would ideally be replaced with stronger service identity controls in a production deployment.
 
-**Redis quote cache TTL of 15 seconds.** A longer TTL reduces Finnhub API calls and improves latency but serves increasingly stale prices — a material problem for paper trading where execution price is the whole point. A shorter TTL increases API call frequency, raising the risk of hitting free-tier rate limits during market hours. 15 seconds is a compromise: stale enough to be cache-effective, fresh enough that the displayed price isn't misleading for a paper trading context.
+---
 
-Database-per-service, chosen deliberately by data shape. Each service owns its own schema — Auth and User each get their own Postgres database, Portfolio gets Postgres for transactional consistency (cash + holdings + trades must commit atomically), and Market Service holds no persistent database at all, using Redis purely as an ephemeral cache layer.
+## Auth Service owns authentication state; User Service owns profile data
 
-Auth and User identity are split, not merged. Auth Service owns credentials, JWT issuance, and OAuth2/Keycloak integration. User Service owns profile data only. This keeps credential-handling logic isolated to one security boundary and lets every other service consume identity via Kafka events instead of duplicating auth logic.
+Authentication and profile data are intentionally separated.
 
-One JWT format regardless of login method. Both local username/password login and Keycloak OIDC login are normalized into a single self-issued JWT shape by Auth Service. Every downstream service reads one consistent claim structure (userId, role) regardless of how the user originally authenticated.
+**Auth Service owns:**
 
-Gateway-centric trust model (zero-trust internal architecture). Spring Cloud Gateway is the sole JWT verification point. It extracts identity claims and forwards them as headers (X-User-Id, X-User-Role) alongside a shared secret header, so downstream services never re-parse or re-verify JWTs — they trust Gateway-forwarded headers exclusively, validated by a per-service internal filter checking the shared secret.
+- credentials
+- authentication provider
+- account status
+- role
+- JWT issuance
+- refresh tokens
+- Keycloak integration
 
-Event-driven fan-out for cross-service consistency. A single user-registered Kafka event, published once by Auth Service, is independently consumed by User Service (profile creation) and Portfolio Service (seeding a virtual $100,000 cash balance) — one producer, multiple independent consumers, no direct service-to-service coupling for onboarding.
+**User Service owns:**
 
-Derived financial data is never persisted as a stored field. Portfolio total worth (cash + live holding value) is computed on-read at request time by calling Market Service for current prices, rather than stored and incrementally updated — avoiding the correctness burden of keeping a derived value in sync with every price tick.
+- profile-level information
 
-Dual-provider market data with automatic failover. Finnhub is the primary quote provider; Alpha Vantage is a Resilience4j circuit-breaker fallback, invoked only when Finnhub's circuit opens — not exposed as an independently callable endpoint, preserving its limited daily quota.
+This prevents two services from becoming authoritative for security-sensitive account state.
 
-Engineering Challenges
+---
 
-Spring Boot / Spring Cloud version incompatibility. Initial Gateway setup on Spring Boot 4.1.0 with Spring Cloud 2025.1.2 resulted in routes silently failing to register (New routes count: 0) despite correct YAML configuration confirmed via Config Server. Root-caused to an immature artifact (spring-cloud-starter-gateway-server-webflux) in a not-yet-stable Boot/Cloud pairing; resolved by standardizing all services on Spring Boot 3.3.5 with Spring Cloud 2023.0.3.
+## Refresh-token rotation with hashed storage
 
-Correctly sequencing weighted-average cost basis calculation. Updating a Holding's average cost basis on repeated buys requires computing the weighted average before mutating the stored quantity — reversing this order silently corrupts the calculation without throwing any error, since the bug produces a plausible-looking but incorrect number rather than a crash.
+Refresh tokens are random values sent to the client while only their SHA-256 hashes are persisted.
 
-Distinguishing service identity from user identity in inter-service calls. Forwarding X-User-Id/X-User-Role headers between services (e.g. Portfolio calling Market Service) initially conflated "this call is authorized" with "this user identity claim is trustworthy" — a compromised or buggy internal service could otherwise forge arbitrary user context. Resolved by auditing each downstream service's actual attack surface: Market Service performs no user-scoped mutations, so forwarded identity headers carry no exploitable risk there, while Portfolio Service — the one service with financial mutations — only ever receives identity headers directly from Gateway, never from peer-service calls.
+On refresh:
 
-Kafka consumer idempotency under redelivery. Designing every Kafka consumer (User Service, Portfolio Service, and later Audit/Analytics) to safely handle at-least-once delivery semantics — a redelivered user-registered event must not create duplicate profile or portfolio rows, enforced via existence checks backed by unique DB constraints.
+1. The incoming token is hashed.
+2. The stored token record is located.
+3. The token is checked for expiry and revocation.
+4. The existing token is revoked.
+5. A new access-token and refresh-token pair is issued.
 
-AuthenticationManager circular proxy in Spring Boot 4. Exposing AuthenticationManager as a @Bean from the same SecurityConfig that builds the SecurityFilterChain creates an AOP proxy that delegates back to itself, producing a StackOverflowError at runtime. The fix is separating the AuthenticationManager bean into its own configuration class so it has no involvement in building the filter chain.
+This makes refresh tokens effectively single-use.
 
-JWT filter running on public endpoints. Spring Security's permitAll() controls authorization, not filter execution. A custom OncePerRequestFilter registered via addFilterBefore runs on every request regardless of path rules. Public endpoints like /auth/login were hitting the internal header check and returning 403. Resolved by overriding shouldNotFilter() to return early for whitelisted paths.
+---
 
-Redis deserialization with Jackson 3. Spring Boot 4 ships with Jackson 3, which relocated packages from com.fasterxml.jackson to tools.jackson. GenericJacksonJsonRedisSerializer without explicit type information deserializes cached objects as LinkedHashMap rather than the target DTO, throwing IllegalStateException on cache retrieval. Resolved using Jackson2JsonRedisSerializer<QuoteResponse> with an explicit type parameter, eliminating the need for default typing or @class metadata in the stored JSON.
+## JIT provisioning for Keycloak users
 
-Gateway not forwarding internal secret to public routes. The internal secret header was added only inside the JWT validation block, which public paths bypassed entirely. Services receiving public-route requests had no X-Internal-Gateway header and returned 403. Fixed by sanitizing and injecting the secret on all requests before the public path short-circuit, so every forwarded request carries the header regardless of whether it required JWT validation.
+A Keycloak user does not need to exist in TradeHub before their first successful SSO login.
 
-Kafka event schema divergence across services. Auth Service publishes UserRegisteredEvent with authProvider as a field. User Service needs authProvider for profile data. Portfolio Service needs only userId, username, and email to seed a new portfolio. Sharing a single event class across services via a common module would couple them to Auth Service's domain enums. Each service defines its own local version of the event record with only the fields it cares about — Jackson ignores unknown fields during deserialization by default, so the payload is forwards and backwards compatible without coordination.
+During the SSO flow, the Auth Service extracts the identity claims, looks for an existing account, and either:
 
-Refresh token as a record. Java records are fully immutable — a revoked flag on a refresh token record cannot be flipped after creation because there are no setters and updatable = false would prevent JPA from writing the change anyway. Refresh tokens must be mutable entities to support revocation, so a regular class with Lombok is the correct model despite records being idiomatic for other DTOs in the project.
+- links the external identity to an existing account, or
+- creates a new local authentication record
 
-Engineering Tradeoffs
+Downstream profile and portfolio initialization then happens asynchronously through Kafka.
 
-BigDecimal over primitive numeric types for all monetary and share-quantity fields, accepting the verbosity cost in exchange for eliminating floating-point rounding error accumulation across repeated trades — a standard requirement for any system modeling money.
+---
 
-Optimistic locking (@Version) over pessimistic row locking on the Portfolio entity, trading a small chance of retry-on-conflict for significantly better read throughput under normal (low-contention) load, appropriate for a single-user-per-portfolio access pattern.
+## Portfolio entities as separate aggregate roots
 
-Fractional share support was chosen over integer-only quantities, adding BigDecimal precision-handling complexity throughout the trade execution path in exchange for closer alignment with real-world brokerage behavior.
+`Portfolio`, `Holding`, and `Trade` are modeled as separate JPA entities without ORM-managed relationships between them.
 
-Denormalizing username/email into User Service rather than querying Auth Service at read time, accepting minor data duplication and eventual-consistency risk (a username change in Auth Service requires a follow-up sync event) in exchange for removing a synchronous cross-service dependency from every profile read.
+Cross-aggregate references are stored as UUIDs rather than `@ManyToOne` / `@OneToMany` relationships.
 
-A shared internal-secret header (rather than mTLS or per-service OAuth2 client credentials) authenticates Gateway-to-service calls, chosen for implementation speed within project scope; documented as the production-grade gap, with mTLS or OAuth2 client-credentials identified as the correct next step for genuine service-identity verification.
+This makes boundaries explicit and avoids:
 
-OTP-based two-factor authentication was scoped out after evaluating implementation cost against project timeline, in favor of a two-method authentication model (local credentials + Keycloak OIDC) that still demonstrates dual-provider identity handling and JWT normalization.
+- accidental cascade operations
+- unexpected lazy loading
+- unnecessary transaction coupling
 
-Internal header secret vs network isolation. The X-Internal-Gateway shared secret provides application-layer service authentication without infrastructure changes. The real-world approach is VPC subnet isolation (services unreachable externally) combined with mTLS for encrypted service-to-service traffic. The header approach is a deliberate simplification: the secret is static, rotation requires a coordinated redeploy of all services, and a compromised secret allows direct service access from inside the network. Documented here as a known limitation rather than an oversight.
+---
 
-HS256 vs RS256 for JWT signing. HMAC-SHA256 requires the same secret on every service that validates tokens. In this architecture that means the gateway and every microservice share one secret, widening the attack surface with each service added. RS256 with asymmetric keys would let Auth Service hold the private key exclusively while all verifiers use the public key — free to distribute, no shared secret risk. HS256 was chosen for implementation simplicity; the migration path to RS256 requires only a key generation step and a config update per service.
+## Derived portfolio value is not persisted
 
-Local DAO auth alongside Keycloak. Running two auth paths means two sources of credential management, two sets of signup/login code, and the complexity of ensuring both paths produce identical JWT claims. The production pattern is to configure Keycloak as the single front door and run username/password auth inside Keycloak's own user store rather than building it separately. The dual-path approach was retained to demonstrate hand-rolled JWT auth as a portfolio artifact, with this trade-off explicitly acknowledged.
+Portfolio worth is calculated when requested:
 
-Soft delete via deletedAt timestamp vs a boolean flag. A deletedAt timestamp column is marginally more expensive to index and query against than a boolean isDeleted flag but captures when deletion occurred — necessary for GDPR data retention schedules, audit trails, and purge jobs that hard-delete records older than a retention window. @SQLRestriction("deleted_at IS NULL") on the entity makes the filter transparent to all queries without adding a WHERE clause manually everywhere.
+```text
+Total Worth = Cash Balance + Σ(Holding Quantity × Current Price)
+```
 
-Bare UUID FK columns vs JPA-managed relationships across aggregates. ORM-managed @ManyToOne / @OneToMany relationships across Portfolio, Holding, and Trade would simplify some query patterns but introduce cascade risks, lazy-loading surprises, and transaction scope coupling between entities that should be independently mutable. A trade execution touches Holding (update quantity and cost basis), Portfolio (update cash balance), and Trade (append new row) — three separate writes that should each be explicit, not triggered implicitly by cascade. Bare UUID columns keep aggregate boundaries honest at the cost of slightly more verbose repository queries.
+Persisting `totalWorth` would require keeping it synchronized with changing market prices.
 
-Redis quote cache TTL of 15 seconds. A longer TTL reduces Finnhub API calls and improves latency but serves increasingly stale prices — a material problem for paper trading where execution price is the whole point. A shorter TTL increases API call frequency, raising the risk of hitting free-tier rate limits during market hours. 15 seconds is a compromise: stale enough to be cache-effective, fresh enough that the displayed price isn't misleading for a paper trading context.
+Instead, market prices are obtained from the Market Service and the value is derived at read time.
+
+---
+
+## Market-data resilience
+
+Finnhub is the primary quote provider.
+
+The Market Service combines:
+
+- Redis caching
+- rate limiting
+- retries
+- circuit breaking
+- a secondary provider
+- stale-cache fallback
+
+The cache uses a short TTL to balance price freshness against external provider rate limits.
+
+---
+
+# Engineering Challenges
+
+## AuthenticationManager circular proxy
+
+Exposing `AuthenticationManager` from the same configuration that builds the `SecurityFilterChain` created a circular AOP proxy and resulted in a `StackOverflowError`.
+
+The fix was to separate the `AuthenticationManager` bean configuration from the filter-chain configuration.
+
+---
+
+## JWT filter running on public endpoints
+
+`permitAll()` controls authorization, not whether a servlet filter executes.
+
+Because the custom `OncePerRequestFilter` was initially applied to every request, public endpoints such as login and signup could still reach authentication logic.
+
+The filter was updated to skip explicitly whitelisted public paths.
+
+---
+
+## Redis deserialization with Jackson 3
+
+Spring Boot 4 uses Jackson 3, and GenericJacksonJsonRedisSerializer without type information caused cached DTOs to deserialize as `LinkedHashMap` . The issue was 
+
+resolved by enabling Jackson default typing with a restricted `BasicPolymorphicTypeValidator`, allowing Redis to preserve and safely reconstruct the required DTO 
+
+and JDK types.
+
+---
+
+## Gateway secret on public routes
+
+The internal gateway secret was initially added only inside the JWT-validation path.
+
+Public routes therefore reached downstream services without the header and were rejected by the internal-header filter.
+
+The fix was to sanitize client-supplied internal headers and inject the gateway secret for every forwarded request before the public/private route decision.
+
+---
+
+## Kafka event schema divergence
+
+Different consumers need different subsets of a `UserRegisteredEvent`.
+
+Instead of sharing Auth Service's domain event class through a common module, each consumer maintains its own local event representation.
+
+This reduces coupling between service domains while allowing the Kafka payload to evolve without forcing every consumer to adopt the producer's entire domain model.
+
+---
+
+## Refresh tokens must remain mutable entities
+
+Refresh-token records need a revocable state.
+
+Java records are immutable and therefore unsuitable for a JPA entity whose `revoked` field must change during token rotation.
+
+Other immutable request/response structures can still use records; refresh-token persistence intentionally uses a mutable entity.
+
+---
+
+## Weighted-average cost basis
+
+Repeated purchases of the same asset require a weighted-average calculation.
+
+The important ordering is to calculate the new average cost using the old quantity and old average before mutating the stored quantity.
+
+Reversing that sequence produces plausible-looking but financially incorrect values without necessarily causing an exception.
+
+---
+
+## Kafka consumer idempotency
+
+Kafka provides at-least-once delivery semantics, so consumers must tolerate duplicate events.
+
+User and Portfolio consumers use existence checks backed by database uniqueness constraints so that redelivery does not create duplicate profile or portfolio records.
+
+---
+
+# Engineering Trade-offs
+
+| Decision | Chosen approach | Trade-off |
+|---|---|---|
+| Service-to-service authentication | Shared internal gateway secret | Simple to implement, but weaker than mTLS/workload identity |
+| JWT signing | HS256 | Simple shared-secret model, but every verifier shares the signing secret |
+| Authentication providers | Local auth + Keycloak | Demonstrates multiple flows, but introduces duplicated auth responsibilities |
+| Aggregate relationships | Bare UUID references | Stronger aggregate boundaries, but slightly more verbose queries |
+| Portfolio locking | Optimistic locking | Better throughput under low contention, but conflicts require retry/error handling |
+| Quote cache TTL | 15 seconds | Balances freshness against external API limits |
+| Share quantities | `BigDecimal` | More precision and correct monetary arithmetic, but more verbose code |
+| User profile duplication | Local profile copy in User Service | Removes synchronous Auth dependency, but introduces eventual consistency |
+| 2FA | Out of scope | Keeps project scope manageable while still demonstrating local auth + OIDC |
+
+---
+
+# Data Ownership
+
+The project uses a **database-per-service mindset**.
+
+### Auth Service
+Owns authentication state, credentials, account status, roles, refresh tokens, and Keycloak identity mapping.
+
+### User Service
+Owns profile-level user data.
+
+### Portfolio Service
+Owns portfolios, holdings, and immutable trade records.
+
+### Market Service
+Uses Redis as a short-lived cache and does not rely on a persistent market-data database for live quotes.
+
+This separation keeps data ownership explicit and prevents services from reaching directly into another service's database.
+
+---
+
+# Reliability & Distributed Systems
+
+TradeHub intentionally uses different communication models depending on the problem.
+
+### Synchronous communication
+
+Used when the caller needs an immediate result.
+
+Example:
+
+```text
+Portfolio Service → Market Service
+        validate symbol
+        get current quote
+```
+
+### Asynchronous communication
+
+Used when downstream processing can happen independently.
+
+Example:
+
+```text
+Auth Service
+     |
+     | user-registered
+     v
+   Kafka
+   /   \
+  v     v
+User   Portfolio
+```
+
+This avoids turning every cross-service operation into a synchronous dependency chain.
+
+---
+
+# Technology Stack
+
+| Area | Technology |
+|---|---|
+| Language | Java |
+| Framework | Spring Boot |
+| Microservices | Spring Cloud |
+| API Gateway | Spring Cloud Gateway |
+| Service Discovery | Eureka |
+| Configuration | Spring Cloud Config |
+| Security | Spring Security |
+| Authentication | JWT + Keycloak OAuth2/OIDC |
+| Inter-service HTTP | OpenFeign |
+| Messaging | Apache Kafka |
+| Relational Database | PostgreSQL |
+| Cache | Redis |
+| Resilience | Resilience4j |
+| Containerization | Docker + Docker Compose |
+| Persistence | Spring Data JPA / Hibernate |
+
+---
+
+# Repository Structure
+
+```text
+TradeHub/
+├── api-gateway/
+├── auth_service/
+├── config-server/
+├── eureka-server/
+├── market_service/
+├── portfolio_service/
+├── user_service/
+└── docker-compose.yml
+```
+
+Each service owns its own application logic and persistence boundary rather than sharing a single domain layer.
+
+---
+
+# Architecture Principles
+
+TradeHub is built around a few principles:
+
+**Business-aligned service boundaries**
+
+Services own a specific domain responsibility rather than representing technical layers of one application.
+
+**Explicit data ownership**
+
+A service owns its data and other services communicate through APIs or events rather than shared database access.
+
+**Synchronous where necessary, asynchronous where possible**
+
+Immediate business decisions use synchronous calls; independent side effects use Kafka events.
+
+**Authentication centralized, authorization contextual**
+
+Identity is established at the gateway and propagated to downstream services, while business operations remain owned by the service responsible for that domain.
+
+**Derived data stays derived**
+
+Values that depend on volatile external state are calculated instead of becoming another consistency problem.
+
+**Resilience is part of the design**
+
+External APIs are treated as unreliable dependencies rather than assumed to be always available.
+
+---
+
+# Known Production Gaps
+
+TradeHub is primarily a **demonstration of architecture and engineering concepts**, not a production trading platform.
+
+Some deliberate simplifications remain:
+
+- Shared gateway secret instead of mTLS or workload identity
+- HS256 instead of asymmetric JWT signing
+- No OTP-based MFA
+- No transactional outbox for database-to-Kafka dual writes
+- Limited operational observability compared with a production deployment
+- Local Docker Compose infrastructure rather than a cloud deployment
+
+These are documented deliberately because understanding the gap between a working design and a production design is part of the project's goal.
+
+---
+
+# Future Improvements
+
+Potential next steps include:
+
+- Transactional outbox for reliable event publication
+- Stronger service-to-service identity using mTLS or workload identity
+- RS256/ES256 asymmetric JWT signing
+- Dead-letter handling and retry strategy for Kafka consumers
+- Distributed tracing and centralized observability
+- Better secret management and rotation
+- Load testing and concurrency testing
+- Kubernetes deployment
+- More complete failure-injection testing
+
+---
+
+## Closing Note
+
+TradeHub is not intended to be evaluated as a commercial trading platform.
+
+It is a learning-driven engineering project designed to explore how a backend evolves once the simple CRUD problems are no longer the interesting part.
+
+The main goal is to understand the reasoning behind the architecture:
+
+**service boundaries → data ownership → synchronous vs asynchronous communication → consistency → concurrency → resilience → security**
+
+That reasoning is what the diagrams and implementation are intended to document.
+
+Thank you for looking through the repository and if you are someone who's looking to build a sample microservices project for learning purposes then I hope this can serve as a demonstration on how to approach such a project. 

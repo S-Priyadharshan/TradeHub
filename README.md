@@ -55,16 +55,13 @@ sequenceDiagram
     participant DB as Auth DB
     participant Kafka
 
-    rect rgb(240, 240, 240)
     note over Client,DB: Path A — Local login
     Client->>Auth: POST /auth/login (username, password)
     Auth->>Auth: authenticationManager.authenticate()
     Auth->>DB: load AuthUser
     Auth->>Auth: generateToken() + generateAndPersistRefreshToken()
     Auth-->>Client: 200 accessToken + refreshToken
-    end
 
-    rect rgb(230, 245, 255)
     note over Client,DB: Path B — Keycloak OAuth2
     Client->>Auth: GET /auth/keycloak/callback?code=...
     Auth->>KC: exchange authCode for token
@@ -85,7 +82,6 @@ sequenceDiagram
 
     Auth->>Auth: generateToken() + generateAndPersistRefreshToken()
     Auth-->>Client: 200 accessToken + refreshToken
-    end
 
     note over Auth,Kafka: New local signups also publish "user-registered"<br/>consumed independently by User + Portfolio services
 ```

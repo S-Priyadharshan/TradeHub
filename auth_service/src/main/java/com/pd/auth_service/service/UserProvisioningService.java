@@ -4,8 +4,10 @@ import com.pd.auth_service.domain.entity.AuthUser;
 import com.pd.auth_service.domain.enums.AccountStatus;
 import com.pd.auth_service.domain.enums.AuthProvider;
 import com.pd.auth_service.domain.enums.Role;
+import com.pd.auth_service.domain.event.UserRegisteredEvent;
 import com.pd.auth_service.repository.AuthUserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 
@@ -18,6 +20,7 @@ import java.util.UUID;
 public class UserProvisioningService {
 
     private final AuthUserRepository authUserRepository;
+    private final KafkaTemplate<String, UserRegisteredEvent> kafkaTemplate;
 
     public AuthUser jitProvisioning(Jwt jwt){
 
@@ -49,7 +52,18 @@ public class UserProvisioningService {
                 .role(Role.USER)
                 .lastLoginAt(LocalDateTime.now(ZoneId.systemDefault()))
                 .build();
-        return authUserRepository.save(user);
+        AuthUser savedUser = authUserRepository.save(user);
 
+        UserRegisteredEvent event = new UserRegisteredEvent(
+                savedUser.getUserId(),
+                savedUser.getUsername(),
+                savedUser.getEmail(),
+                savedUser.getCreatedAt(),
+                savedUser.getAuthProvider()
+        );
+
+        kafkaTemplate.send("user-registered",savedUser.getUserId().toString(),event);
+
+        return savedUser;
     }
 }

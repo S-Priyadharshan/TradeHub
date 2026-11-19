@@ -12,7 +12,7 @@ The engineering problems are the focus.
 
 ### High-Level Design
 
-<img width="1172" height="608" alt="image" src="https://github.com/user-attachments/assets/e3f5ab79-1f9f-473b-9966-c1427c655043" />
+<img width="1024" height="531" alt="image" src="https://github.com/user-attachments/assets/403c7489-f2bb-4dec-91d1-db3d61416d8a" />
 
 ---
 
